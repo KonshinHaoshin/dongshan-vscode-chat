@@ -35,6 +35,10 @@ class DongshanChatProvider implements vscode.WebviewViewProvider {
   private sessionName = "";
   private sessions: string[] = [];
   private pendingAssistantChunk = false;
+  private execConfirmBuffer = "";
+  private execConfirmQueue: Array<{ command: string; prefix: string }> = [];
+  private execConfirmInFlight = false;
+  private restartAfterStop = false;
 
   constructor(private readonly context: vscode.ExtensionContext) {}
 
@@ -141,6 +145,9 @@ class DongshanChatProvider implements vscode.WebviewViewProvider {
 
     this.post({ type: "status", text: `Starting: ${cmd} ${args.join(" ")}`, level: "info" });
     this.post({ type: "clearAssistantBuffer" });
+    this.execConfirmBuffer = "";
+    this.execConfirmQueue = [];
+    this.execConfirmInFlight = false;
 
     try {
       this.proc = spawn(cmd, args, { cwd, stdio: "pipe", shell: true });
@@ -157,7 +164,7 @@ class DongshanChatProvider implements vscode.WebviewViewProvider {
 
     this.proc.stdout.on("data", (chunk: Buffer) => {
       const text = stripAnsi(chunk.toString("utf8")).replace(/\r/g, "");
-      this.pushAssistantText(cleanPromptEcho(text));
+      this.handleProcessStdout(text);
     });
 
     this.proc.stderr.on("data", (chunk: Buffer) => {
@@ -174,6 +181,10 @@ class DongshanChatProvider implements vscode.WebviewViewProvider {
       });
       this.post({ type: "running", value: false });
       this.pendingAssistantChunk = false;
+      if (this.restartAfterStop) {
+        this.restartAfterStop = false;
+        setTimeout(() => this.startProcess(), 50);
+      }
     });
 
     this.proc.on("error", (err) => {
@@ -200,8 +211,7 @@ class DongshanChatProvider implements vscode.WebviewViewProvider {
     this.saveSessions();
     this.pushSessions();
     this.pushSessionHistory(this.sessionName);
-    this.stopProcess();
-    setTimeout(() => this.startProcess(), 350);
+    this.restartRunningProcessForSessionChange();
   }
 
   switchSession(session: string): void {
@@ -213,8 +223,16 @@ class DongshanChatProvider implements vscode.WebviewViewProvider {
     this.saveSessions();
     this.pushSessions();
     this.pushSessionHistory(this.sessionName);
+    this.restartRunningProcessForSessionChange();
+  }
+
+  private restartRunningProcessForSessionChange(): void {
+    if (!this.proc || this.proc.killed) {
+      this.startProcess();
+      return;
+    }
+    this.restartAfterStop = true;
     this.stopProcess();
-    setTimeout(() => this.startProcess(), 350);
   }
 
   private sendToProcess(text: string): void {
@@ -245,6 +263,56 @@ class DongshanChatProvider implements vscode.WebviewViewProvider {
       this.pendingAssistantChunk = true;
     }
     this.post({ type: "assistantChunk", text });
+  }
+
+  private handleProcessStdout(text: string): void {
+    const merged = this.execConfirmBuffer + cleanPromptEcho(text);
+    const parsed = extractExecConfirmPrompts(merged);
+    this.execConfirmBuffer = parsed.tail;
+    for (const item of parsed.prompts) {
+      this.execConfirmQueue.push(item);
+    }
+    if (parsed.display.trim()) {
+      this.pushAssistantText(parsed.display);
+    }
+    void this.drainExecConfirmQueue();
+  }
+
+  private async drainExecConfirmQueue(): Promise<void> {
+    if (this.execConfirmInFlight) {
+      return;
+    }
+    this.execConfirmInFlight = true;
+    try {
+      while (this.execConfirmQueue.length > 0) {
+        const item = this.execConfirmQueue.shift();
+        if (!item) {
+          continue;
+        }
+        if (!this.proc || this.proc.killed) {
+          break;
+        }
+        const picked = await vscode.window.showWarningMessage(
+          `Run command?\n${item.command}`,
+          { modal: true },
+          "确定",
+          "不",
+          `总是允许 ${item.prefix}`,
+          "停止"
+        );
+        let reply = "n";
+        if (picked === "确定") {
+          reply = "y";
+        } else if (picked?.startsWith("总是允许")) {
+          reply = "a";
+        } else if (picked === "停止") {
+          reply = "q";
+        }
+        this.sendRaw(reply);
+      }
+    } finally {
+      this.execConfirmInFlight = false;
+    }
   }
 
   private async pickAndInsertFileCommand(): Promise<void> {
@@ -1215,6 +1283,33 @@ function cleanPromptEcho(input: string): string {
   return input.replace(/^\s*you>\s?/gm, "");
 }
 
+function extractExecConfirmPrompts(input: string): {
+  display: string;
+  prompts: Array<{ command: string; prefix: string }>;
+  tail: string;
+} {
+  const re = /\[exec-confirm\]\s*Run command `([^`]+)` \? \[y=yes\]\/\[n=no\]\/\[a=always `([^`]+)`\]\/\[q=stop\]:\s*/g;
+  const prompts: Array<{ command: string; prefix: string }> = [];
+  let display = "";
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(input)) !== null) {
+    display += input.slice(last, m.index);
+    prompts.push({ command: m[1].trim(), prefix: m[2].trim() });
+    last = re.lastIndex;
+  }
+  let remainder = input.slice(last);
+  const partialIdx = remainder.lastIndexOf("[exec-confirm]");
+  let tail = "";
+  if (partialIdx >= 0) {
+    display += remainder.slice(0, partialIdx);
+    tail = remainder.slice(partialIdx);
+  } else {
+    display += remainder;
+  }
+  return { display, prompts, tail };
+}
+
 function makeNonce(): string {
   const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
   let out = "";
@@ -1280,11 +1375,15 @@ function parsePromptListOutput(output: string): { activePrompt: string; prompts:
 }
 
 function parseModelListOutput(output: string): { activeModel: string; models: string[] } {
-  const lines = output.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  // Keep leading spaces because CLI uses "  name" for non-active models.
+  const lines = output
+    .split(/\r?\n/)
+    .map((l) => l.replace(/\s+$/, ""))
+    .filter((l) => l.trim().length > 0);
   let active = "";
   const models: string[] = [];
   for (const line of lines) {
-    const mActive = line.match(/^Current model:\s*(.+)$/i);
+    const mActive = line.trim().match(/^Current model:\s*(.+)$/i);
     if (mActive) {
       active = mActive[1].trim();
       continue;
