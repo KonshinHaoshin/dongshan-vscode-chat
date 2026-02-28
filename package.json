@@ -1,0 +1,136 @@
+{
+  "name": "dongshan-vscode-chat",
+  "displayName": "Dongshan Chat",
+  "description": "Use dongshan CLI inside VS Code with a Codex/Claude-style chat sidebar.",
+  "version": "0.1.0",
+  "publisher": "local",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onView:dongshanChatView",
+    "onCommand:dongshanChat.start",
+    "onCommand:dongshanChat.stop",
+    "onCommand:dongshanChat.newSession",
+    "onCommand:dongshanChat.sendSelection"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "dongshan",
+          "title": "Dongshan",
+          "icon": "media/dongshan.svg"
+        }
+      ]
+    },
+    "views": {
+      "dongshan": [
+        {
+          "id": "dongshanChatView",
+          "name": "Chat",
+          "type": "webview"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "dongshanChat.start",
+        "title": "Dongshan: Start Chat"
+      },
+      {
+        "command": "dongshanChat.stop",
+        "title": "Dongshan: Stop Chat"
+      },
+      {
+        "command": "dongshanChat.newSession",
+        "title": "Dongshan: New Session"
+      },
+      {
+        "command": "dongshanChat.sendSelection",
+        "title": "Dongshan: Send Editor Selection"
+      },
+      {
+        "command": "dongshanChat.fileRead",
+        "title": "Dongshan: Insert /read for File"
+      },
+      {
+        "command": "dongshanChat.fileAsk",
+        "title": "Dongshan: Insert /askfile for File"
+      },
+      {
+        "command": "dongshanChat.fileGrep",
+        "title": "Dongshan: Insert /grep for Folder/File"
+      },
+      {
+        "command": "dongshanChat.insertCommandGuide",
+        "title": "Dongshan: Insert Command Guide"
+      }
+    ],
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "dongshanChat.fileRead",
+          "when": "resourceScheme == file",
+          "group": "dongshan@1"
+        },
+        {
+          "command": "dongshanChat.fileAsk",
+          "when": "resourceScheme == file",
+          "group": "dongshan@2"
+        },
+        {
+          "command": "dongshanChat.fileGrep",
+          "when": "resourceScheme == file",
+          "group": "dongshan@3"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Dongshan Chat",
+      "properties": {
+        "dongshanChat.executable": {
+          "type": "string",
+          "default": "dongshan",
+          "description": "Path or command for dongshan executable."
+        },
+        "dongshanChat.extraArgs": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "description": "Extra args appended to `dongshan chat`."
+        },
+        "dongshanChat.autoStart": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically start dongshan chat when the view opens."
+        },
+        "dongshanChat.maxRenderedMessages": {
+          "type": "number",
+          "default": 80,
+          "minimum": 20,
+          "description": "Only keep this many latest message bubbles rendered in webview to avoid UI slowdown."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p .",
+    "watch": "tsc -watch -p .",
+    "vscode:prepublish": "npm run compile"
+  },
+  "devDependencies": {
+    "@types/node": "^20.16.5",
+    "@types/vscode": "^1.90.0",
+    "typescript": "^5.6.2"
+  },
+  "dependencies": {
+    "mermaid": "^11.12.0"
+  }
+}
