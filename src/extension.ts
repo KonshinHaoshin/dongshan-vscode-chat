@@ -580,7 +580,7 @@ class DongshanChatProvider implements vscode.WebviewViewProvider {
     }
     .meta {
       display: grid;
-      grid-template-columns: 1fr auto 1fr auto auto auto;
+      grid-template-columns: 1fr 1fr auto auto;
       gap: 8px;
       padding: 8px 10px;
       border-bottom: 1px solid var(--line);
@@ -730,14 +730,11 @@ class DongshanChatProvider implements vscode.WebviewViewProvider {
     <button id="stop">Stop</button>
     <button id="new">New</button>
     <button id="attach">Attach</button>
-    <button id="guide">Cmd Help</button>
     <span id="running" class="dot"></span>
   </div>
   <div class="meta">
     <select id="promptSel"></select>
-    <button id="promptApply">Use Prompt</button>
     <select id="modelSel"></select>
-    <button id="modelApply">Use Model</button>
     <button id="addModel">Add Model</button>
     <button id="refreshMeta">Refresh</button>
   </div>
@@ -1097,13 +1094,6 @@ class DongshanChatProvider implements vscode.WebviewViewProvider {
       vscode.postMessage({ type: "newSession" });
     });
     document.getElementById("attach").addEventListener("click", () => vscode.postMessage({ type: "pickFileCommand" }));
-    document.getElementById("guide").addEventListener("click", () => vscode.postMessage({ type: "insertGuide" }));
-    document.getElementById("promptApply").addEventListener("click", () => {
-      if (promptSel.value) vscode.postMessage({ type: "usePrompt", name: promptSel.value });
-    });
-    document.getElementById("modelApply").addEventListener("click", () => {
-      if (modelSel.value) vscode.postMessage({ type: "useModel", name: modelSel.value });
-    });
     document.getElementById("refreshMeta").addEventListener("click", () => vscode.postMessage({ type: "refreshMeta" }));
     document.getElementById("addModel").addEventListener("click", () => {
       const name = window.prompt("Model name (required)");
@@ -1112,6 +1102,12 @@ class DongshanChatProvider implements vscode.WebviewViewProvider {
       const apiKeyEnv = window.prompt("API key env var (optional, e.g. OPENAI_API_KEY)", "") || "";
       const apiKey = window.prompt("API key literal (optional)", "") || "";
       vscode.postMessage({ type: "addModel", name: name.trim(), baseUrl, apiKeyEnv, apiKey });
+    });
+    promptSel.addEventListener("change", () => {
+      if (promptSel.value) vscode.postMessage({ type: "usePrompt", name: promptSel.value });
+    });
+    modelSel.addEventListener("change", () => {
+      if (modelSel.value) vscode.postMessage({ type: "useModel", name: modelSel.value });
     });
     sessions.addEventListener("change", () => {
       const val = sessions.value;
